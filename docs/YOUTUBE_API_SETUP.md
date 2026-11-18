@@ -171,7 +171,7 @@ channel's Google account. Copy the answers below; replace the `<...>` placeholde
 - **Special Instructions for Access:**
 
   > BeatPub is a command-line tool that runs on my own computer; there is no hosted
-  > instance and no login system. The complete source code is at <GitHub URL>, and an
+  > instance and no login system. The complete source code is at https://github.com/betkobruno/beatpub, and an
   > end-to-end screencast of the upload flow (command → upload → video visible in
   > YouTube Studio) is linked under Other Supporting Materials.
 
