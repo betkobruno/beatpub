@@ -193,10 +193,16 @@ def test_a_folder_without_meta_yaml_is_valid(tmp_path: Path):
         load_meta(tmp_path, no_defaults, for_draft=True)
 
 
-@pytest.mark.parametrize("slug", ["", "..", "a/b", "a\\b", "what?"])
+@pytest.mark.parametrize("slug", ["", "..", "a/b/c", "a/..", "../a", "/a", "a//b", "a/ b", "what?", "2027-01/wh:at"])
 def test_beat_dir_rejects(slug, tmp_path: Path):
     with pytest.raises(MetaError):
         beat_dir(tmp_path, slug)
+
+
+def test_beat_dir_allows_one_month_folder(tmp_path: Path):
+    assert beat_dir(tmp_path, "tuesday-night") == tmp_path / "tuesday-night"
+    assert beat_dir(tmp_path, "2027-01/03-tuesday-night") == tmp_path / "2027-01" / "03-tuesday-night"
+    assert beat_dir(tmp_path, " 2027-01\\03-tuesday-night\\ ") == tmp_path / "2027-01" / "03-tuesday-night"
 
 
 def test_new_meta_yaml_holds_only_what_the_file_name_says():

@@ -23,7 +23,7 @@ from .youtube import YouTubeError
 from .config import Config, ConfigError, find_root, load_config
 from .drafting import DRAFT_NAME, SHORT_DRAFT_NAME, Draft, DraftError
 from .meta import (META_NAME, Meta, MetaError, beat_dir, collabs_from_handles, credit_line, find_audio,
-                   find_cover, load_meta, meta_yaml_text, parse_beat_name)
+                   find_cover, load_meta, meta_yaml_text, normalize_slug, parse_beat_name)
 from .render import FFMPEG_HINT, RenderError, render_beat
 from .short import render_short
 
@@ -109,7 +109,7 @@ def doctor() -> None:
 
     if config:
         beats = config.beats_dir
-        count = sum(1 for p in beats.iterdir() if p.is_dir() and not p.name.startswith("_")) if beats.is_dir() else 0
+        count = len(schedule.beat_folders(beats))
         rows.append(("ok" if beats.is_dir() else "warn", "beats folder",
                      f"{count} beat folder(s) in {beats}" if beats.is_dir() else f"{beats} does not exist yet"))
 
@@ -149,6 +149,7 @@ def new(
 ) -> None:
     """Create beats/<slug>/meta.yaml, prefilled from the audio file name in that folder."""
     config = get_config()
+    slug = normalize_slug(slug)
     try:
         folder = beat_dir(config.beats_dir, slug)
         created = not folder.exists()
@@ -212,16 +213,128 @@ _announce = [True]      # `run` switches the beat line off after its first step 
 
 
 PRESET_HELP = "x264 preset: veryfast … slow (veryfast is fine for a still picture)"
+SLUG_HELP = "Beat folder under beats/, e.g. tuesday-night or 2027-01/03-tuesday-night"
+FOLDER_HELP = "Instead of one beat: every beat in this folder under beats/ (e.g. 2027-01), in name order"
+
+
+class Declined(typer.Exit):
+    """The owner answered no at the approve question. Ends one beat, not a whole --folder batch."""
+
+
+# The --folder batch being worked through: its beats, the day each one's video draft holds so far
+# (handed out in this run, or in a draft that is being kept), and whether the kept ones were looked up.
+_batch: dict = {"slugs": (), "days": {}, "looked": False}
+
+
+def interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+def batch_days(config: Config, slug: str, ai: bool, force: bool) -> tuple:
+    """
+    In a --folder batch: the days the other beats of the batch hold, so that no two share
+    one although none is approved yet. A beat holds the day of the draft written for it in
+    this run, or of an existing draft that will be kept (not --force, not out of date).
+    """
+    if not _batch["slugs"]:
+        return ()
+    if not _batch["looked"]:
+        _batch["looked"] = True
+        templates = config.root / "templates"
+        for other in _batch["slugs"] if not force else ():
+            try:
+                folder = beat_dir(config.beats_dir, other)
+                meta = load_meta(folder, config, for_draft=True)
+                names = tuple(path.name for path, _ in draft_files(folder, meta, config))
+                fingerprint = drafting.inputs_fingerprint(meta, config, templates, ai)
+                if drafting.draft_status(folder / "out", fingerprint, names) in ("current", "edited"):
+                    when = schedule.parse_when(drafting.read_draft(folder / "out" / DRAFT_NAME).publish_at)
+                    if when:
+                        _batch["days"][other] = when.date()
+            except (MetaError, DraftError, OSError):
+                continue                                   # that beat reports its own problem when its turn comes
+    return tuple(day for other, day in _batch["days"].items() if other != slug)
+
+
+def fully_uploaded(config: Config, folder: Path, no_short: bool = False) -> bool:
+    """Is nothing left to send for this beat: the video is on YouTube, and the Short too if it gets one?"""
+    out = folder / "out"
+    if not log.read_publish(out / log.PUBLISH_JSON):
+        return False
+    if no_short or log.read_publish(out / log.SHORT_PUBLISH_JSON) or not config.shorts.enabled:
+        return True
+    try:
+        return not load_meta(folder, config).short
+    except MetaError:
+        return False
+
+
+def say_uploaded(folder: Path) -> None:
+    for label, name in (("video", log.PUBLISH_JSON), ("Short", log.SHORT_PUBLISH_JSON)):
+        record = log.read_publish(folder / "out" / name)
+        if record:
+            say(f"{label} already uploaded: {record.get('url')}")
+
+
+def each_beat(slug: str, folder: str, action, *, no_short: bool = False) -> None:
+    """
+    Run `action(slug)` for one beat, or with --folder for every beat of a month folder in
+    name order. Beats that are completely uploaded are skipped; a "no" at the approve
+    question moves on to the next beat; an error stops the batch (running it again continues).
+    """
+    if bool(slug.strip()) == bool(folder.strip()):
+        raise fail("name one beat folder, or use --folder <folder> for all beats in it (one of the two)")
+    if slug.strip():
+        action(normalize_slug(slug))
+        return
+    config = get_config()
+    try:
+        beats = schedule.folder_beats(config.beats_dir, folder)
+    except ValueError as exc:
+        raise fail(str(exc)) from None
+    total, done, skipped, declined = len(beats), 0, 0, []
+    _batch.update(slugs=tuple(s for s, _ in beats), days={}, looked=False)
+    try:
+        for number, (beat_slug, path) in enumerate(beats, 1):
+            console.rule(Text(f"{beat_slug}  ({number}/{total})", style="bold"), align="left", style="cyan")
+            if fully_uploaded(config, path, no_short):
+                say_uploaded(path)
+                say("nothing left to do for this beat — skipped")
+                skipped += 1
+                continue
+            try:
+                action(beat_slug)
+                done += 1
+            except Declined:
+                declined.append(beat_slug)
+            except typer.Exit as exc:
+                if exc.exit_code:
+                    say(f"stopped at {beat_slug} ({number} of {total}). Fix what the error says and run the same "
+                        "command again — it continues here; finished beats are skipped.")
+                raise
+    finally:
+        _batch.update(slugs=(), days={}, looked=False)
+    console.rule(style="cyan")
+    say(f"{folder}: {done} done, {skipped} already uploaded" + (f", {len(declined)} not approved" if declined else "")
+        + f" — {total} beats")
+    if declined:
+        say("not approved: " + ", ".join(declined))
+        raise typer.Exit(1)
 
 
 @app.command()
 def render(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP),
     force: bool = typer.Option(False, "--force", help="Render again even if the outputs are up to date"),
     preset: str = typer.Option("medium", "--preset", help=PRESET_HELP),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the ffmpeg commands; write nothing"),
 ) -> None:
     """Audio + cover → out/video.mp4 (1920×1080), beat.mp3 (tagged), thumb.jpg, frame.png, artwork.jpg."""
+    each_beat(slug, folder, lambda s: render_one(s, force=force, preset=preset, dry_run=dry_run))
+
+
+def render_one(slug: str, *, force: bool = False, preset: str = "medium", dry_run: bool = False) -> None:
     config, folder, meta = load_beat(slug)
     try:
         render_beat(folder, meta, config.artist, force=force, dry_run=dry_run, preset=preset, say=say)
@@ -231,12 +344,17 @@ def render(
 
 @short_app.command("render")
 def short_render(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP),
     force: bool = typer.Option(False, "--force", help="Render again even if the outputs are up to date"),
     preset: str = typer.Option("medium", "--preset", help=PRESET_HELP),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the ffmpeg command; write nothing"),
 ) -> None:
     """The beat's best 30 s → out/short.mp4 (1080×1920), short_cover.jpg, short_pick.json."""
+    each_beat(slug, folder, lambda s: short_render_one(s, force=force, preset=preset, dry_run=dry_run))
+
+
+def short_render_one(slug: str, *, force: bool = False, preset: str = "medium", dry_run: bool = False) -> None:
     config, folder, meta = load_beat(slug)
     if not meta.short:
         say("short: false in meta.yaml — no Short for this beat")
@@ -291,13 +409,14 @@ def draft_files(folder: Path, meta: Meta, config: Config) -> list[tuple[Path, st
 
 @app.command()
 def draft(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP),
     ai: bool = typer.Option(False, "--ai", help="Let Claude refine the template draft (needs ai_model + ANTHROPIC_API_KEY)"),
     force: bool = typer.Option(False, "--force", help="Write the drafts again, discarding edits and approval"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the drafts; write nothing, call nothing"),
 ) -> None:
     """Title, description and tags in the channel's style → out/draft.yaml + out/short_draft.yaml."""
-    make_drafts(slug, ai=ai, force=force, dry_run=dry_run)
+    each_beat(slug, folder, lambda s: make_drafts(s, ai=ai, force=force, dry_run=dry_run))
 
 
 def make_drafts(slug: str, *, ai: bool = False, force: bool = False, dry_run: bool = False,
@@ -308,11 +427,18 @@ def make_drafts(slug: str, *, ai: bool = False, force: bool = False, dry_run: bo
     files = draft_files(folder, meta, config)
     names = tuple(path.name for path, _ in files)
     notes = slot_notes(meta, config)
+
+    def reserve(video: Draft) -> None:                     # the next beat of a --folder batch goes after this one
+        when = schedule.parse_when(video.publish_at)
+        if when and _batch["slugs"]:
+            _batch["days"][slug] = when.date()
+
     try:
         fingerprint = drafting.inputs_fingerprint(meta, config, templates, ai)
         status = drafting.draft_status(out, fingerprint, names)
         if status in ("current", "edited") and not force and not dry_run:
-            existing = [drafting.read_draft(path) for path, _ in files]
+            existing = [drafting.read_draft(path, slug) for path, _ in files]
+            reserve(existing[0])
             if show:
                 for (_, heading), item, note in zip(files, existing, notes):
                     show_draft(item, heading, note)
@@ -323,8 +449,10 @@ def make_drafts(slug: str, *, ai: bool = False, force: bool = False, dry_run: bo
                     "edited or approved them, so they were kept. `beatpub draft " + slug + " --force` rewrites them.")
             return existing
 
-        slot = None if meta.publish else schedule.assign_slot(config, slug)
+        slot = None if meta.publish else schedule.assign_slot(
+            config, slug, reserved=batch_days(config, slug, ai, force))
         video, short = drafting.build_drafts(meta, config, templates, slot=slot)
+        reserve(video)
         if ai:
             reason = drafting.ai_unavailable(config)
             if reason:
@@ -377,20 +505,25 @@ def open_in_editor(path: Path) -> bool:
 
 @app.command()
 def approve(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP + "; one question per beat"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Approve without asking"),
     edit: bool = typer.Option(True, "--edit/--no-edit", help="Open the drafts in $EDITOR first (when it is set)"),
 ) -> None:
     """Review the drafts (in $EDITOR if set), check them against YouTube's limits, set approved: true."""
+    each_beat(slug, folder, lambda s: approve_one(s, yes=yes, edit=edit))
+
+
+def approve_one(slug: str, *, yes: bool = False, edit: bool = True) -> None:
     config, folder, meta = load_beat(slug)
     files = draft_files(folder, meta, config)
     try:
         for path, _ in files:
-            drafting.read_draft(path)                      # both must exist before anything opens
-        if edit and not yes and sys.stdin.isatty():
+            drafting.read_draft(path, slug)                # both must exist before anything opens
+        if edit and not yes and interactive():
             for path, _ in files:
                 open_in_editor(path)
-        drafts = [drafting.read_draft(path) for path, _ in files]
+        drafts = [drafting.read_draft(path, slug) for path, _ in files]
     except DraftError as exc:
         raise fail(str(exc)) from None
 
@@ -416,11 +549,11 @@ def approve(
         say("already approved — nothing to do")
         return
     if not yes:
-        if not sys.stdin.isatty():
+        if not interactive():
             raise fail("not approved: no terminal to ask in — run `beatpub approve " + slug + " --yes`")
         if not typer.confirm("Approve these drafts for upload?", default=False):
             say("not approved — edit the files in " + str(folder / "out") + " and run approve again")
-            raise typer.Exit(1)
+            raise Declined(1)
     try:
         for path, heading in files:
             drafting.approve_file(path, heading, slug)
@@ -527,7 +660,7 @@ def do_upload(kind: str, slug: str, *, yes: bool, dry_run: bool, force: bool, no
         say(f"{label} already uploaded: {previous.get('url')} — nothing to do (--force uploads a second copy)")
         return
     try:
-        item = override or drafting.read_draft(draft_path)
+        item = override or drafting.read_draft(draft_path, slug)
     except DraftError as exc:
         raise fail(str(exc)) from None
 
@@ -620,25 +753,27 @@ def do_upload(kind: str, slug: str, *, yes: bool, dry_run: bool, force: bool, no
 
 @app.command()
 def upload(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP),
     yes: bool = typer.Option(False, "--yes", "-y", help="Upload even if the draft is not approved"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the full request; send nothing"),
     force: bool = typer.Option(False, "--force", help="Upload again although publish.json exists (a NEW video)"),
 ) -> None:
     """Upload out/video.mp4 with the approved draft, set the thumbnail, add it to the playlist → out/publish.json."""
-    do_upload("video", slug, yes=yes, dry_run=dry_run, force=force)
+    each_beat(slug, folder, lambda s: do_upload("video", s, yes=yes, dry_run=dry_run, force=force))
 
 
 @short_app.command("upload")
 def short_upload(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP),
     yes: bool = typer.Option(False, "--yes", "-y", help="Upload even if the draft is not approved"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the full request; send nothing"),
     force: bool = typer.Option(False, "--force", help="Upload again although short_publish.json exists (a NEW Short)"),
     no_link: bool = typer.Option(False, "--no-link", help="Upload without the link to the long video"),
 ) -> None:
     """Upload out/short.mp4; its description links to the video uploaded before → out/short_publish.json."""
-    do_upload("short", slug, yes=yes, dry_run=dry_run, force=force, no_link=no_link)
+    each_beat(slug, folder, lambda s: do_upload("short", s, yes=yes, dry_run=dry_run, force=force, no_link=no_link))
 
 
 @app.command()
@@ -648,6 +783,7 @@ def thumbnail(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the requests; send nothing"),
 ) -> None:
     """Set the thumbnails of an already-uploaded beat again (video: thumb.jpg, Short: short_cover.jpg)."""
+    slug = normalize_slug(slug)
     config, folder, _ = load_beat(slug)
     out = folder / "out"
     targets = [("video", out / log.PUBLISH_JSON, out / "thumb.jpg"),
@@ -685,30 +821,53 @@ def thumbnail(
 
 @app.command()
 def run(
-    slug: str = typer.Argument(..., help="Folder name under beats/"),
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help=FOLDER_HELP + "; one approve question per beat"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not stop to ask for approval"),
     ai: bool = typer.Option(False, "--ai", help="Let Claude refine the draft"),
     no_short: bool = typer.Option(False, "--no-short", help="Skip the Short"),
     preset: str = typer.Option("medium", "--preset", help=PRESET_HELP),
     dry_run: bool = typer.Option(False, "--dry-run", help="Go through every step; render, write and send nothing"),
 ) -> None:
-    """Everything for one beat: render → Short → draft → approve → upload → Short upload."""
+    """Everything for one beat (or a --folder of beats): render → Short → draft → approve → upload → Short upload."""
+    each_beat(slug, folder, lambda s: run_one(s, yes=yes, ai=ai, no_short=no_short, preset=preset, dry_run=dry_run),
+              no_short=no_short)
+    if not dry_run:
+        console.rule("[bold]done[/bold]", align="left")
+        say("check everything in YouTube Studio: https://studio.youtube.com/")
+
+
+def run_one(slug: str, *, yes: bool = False, ai: bool = False, no_short: bool = False, preset: str = "medium",
+            dry_run: bool = False) -> None:
     def step(title: str) -> None:
         console.rule(f"[bold]{title}[/bold]", align="left")
 
+    config = get_config()
+    try:
+        path = beat_dir(config.beats_dir, slug)
+    except MetaError as exc:
+        raise fail(str(exc)) from None
+    if fully_uploaded(config, path, no_short):         # also keeps a cleaned beat from being rendered again
+        say_uploaded(path)
+        say("nothing left to do for this beat")
+        return
+
     try:
         step("render the video")
-        render(slug, force=False, preset=preset, dry_run=dry_run)
+        if log.read_publish(path / "out" / log.PUBLISH_JSON):
+            say("the video is already uploaded — not rendered again")
+        else:
+            render_one(slug, force=False, preset=preset, dry_run=dry_run)
         _announce[0] = False
         if not no_short:
             step("render the Short")
-            short_render(slug, force=False, preset=preset, dry_run=dry_run)
+            short_render_one(slug, force=False, preset=preset, dry_run=dry_run)
         step("draft title, description and tags")
         asks = not yes and not dry_run
         drafts = make_drafts(slug, ai=ai, dry_run=dry_run, show=not asks)     # approve shows them when it asks
         if asks:
             step("approve")
-            approve(slug, yes=False, edit=True)
+            approve_one(slug, yes=False, edit=True)
         step("upload the video")
         do_upload("video", slug, yes=yes, dry_run=dry_run, force=False, override=drafts[0] if dry_run else None)
         if not no_short:
@@ -717,9 +876,78 @@ def run(
                       override=drafts[1] if dry_run and len(drafts) > 1 else None)
     finally:
         _announce[0] = True
-    if not dry_run:
-        step("done")
-        say("check both in YouTube Studio: https://studio.youtube.com/")
+
+
+# ----------------------------------------------------------------------------- clean
+CLEAN_FILES = ("video.mp4", "short.mp4", "frame.png", "short_frame.png", "beat.mp3", "artwork.jpg")
+
+
+def megabytes(size: int) -> str:
+    return f"{size / 1e9:.2f} GB" if size >= 1e9 else f"{size / 1e6:.1f} MB"
+
+
+@app.command()
+def clean(
+    slug: str = typer.Argument("", help=SLUG_HELP),
+    folder: str = typer.Option("", "--folder", help="Every beat in this folder under beats/ (e.g. 2027-01)"),
+    everything: bool = typer.Option(False, "--all", help="Every beat folder"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be deleted; delete nothing"),
+) -> None:
+    """Free disk space: delete the big rendered files of beats that are already uploaded. Sources are never touched."""
+    config = get_config()
+    if sum((bool(slug.strip()), bool(folder.strip()), everything)) != 1:
+        raise fail("name one beat folder, or use --folder <folder>, or --all (one of the three)")
+    try:
+        if everything:
+            beats = schedule.beat_folders(config.beats_dir)
+        elif folder.strip():
+            beats = schedule.folder_beats(config.beats_dir, folder)
+        else:
+            path = beat_dir(config.beats_dir, slug)
+            if not path.is_dir():
+                raise MetaError(f"beat folder not found: {path}")
+            beats = [(normalize_slug(slug), path)]
+    except (MetaError, ValueError) as exc:
+        raise fail(str(exc)) from None
+
+    freed = cleaned = kept = failed = 0
+    for beat_slug, path in beats:
+        out = path / "out"
+        if not log.read_publish(out / log.PUBLISH_JSON):
+            say(f"{beat_slug}: not uploaded yet — kept")
+            kept += 1
+            continue
+        if not fully_uploaded(config, path):
+            say(f"{beat_slug}: the video is uploaded but the Short is not yet — kept")
+            kept += 1
+            continue
+        files = [out / name for name in CLEAN_FILES if (out / name).is_file()]
+        if not files:
+            say(f"{beat_slug}: already clean")
+            continue
+        size = 0
+        for file in files:
+            file_size = file.stat().st_size
+            if not dry_run:
+                try:
+                    file.unlink()
+                except OSError as exc:
+                    failed += 1
+                    console.print("[yellow]warning:[/yellow]", end=" ")
+                    say(f"could not delete {file} ({exc.strerror or exc}) — is it open in another program?")
+                    continue
+            size += file_size
+        freed += size
+        cleaned += 1
+        say(f"{beat_slug}: {'would delete' if dry_run else 'deleted'} {', '.join(f.name for f in files)} "
+            f"— {megabytes(size)}")
+    say(f"{'dry run — would free' if dry_run else 'freed'} {megabytes(freed)} in {cleaned} beat(s)"
+        + (f"; {kept} not uploaded yet, left alone" if kept else ""))
+    if not dry_run and cleaned:
+        say("kept: drafts, thumbnails, publish.json and your beat and cover. "
+            "`beatpub render <folder> --force` makes the files again if you ever need them.")
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command()

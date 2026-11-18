@@ -58,7 +58,7 @@ beatpub/
   .gitignore
   beatpub/
     __init__.py
-    cli.py                  typer app: new, render, learn, draft, approve, upload, thumbnail, run, auth, doctor, short, stats, queue
+    cli.py                  typer app: new, render, learn, draft, approve, upload, thumbnail, run, auth, doctor, short, stats, queue, clean
     config.py               load/validate config.yaml
     meta.py                 beats/<slug>/meta.yaml + the file-name parser + input discovery
     render.py               16:9 frame, thumbnail, ffmpeg video, mp3 + tags   (port of scripts/render.py)
@@ -66,7 +66,7 @@ beatpub/
     drafting.py             titles/descriptions/tags from templates (+ optional AI)
     youtube.py              OAuth, learn, upload, thumbnail, playlist, stats
     log.py                  published.csv
-    schedule.py             the scheduling chain: next free slot, queue
+    schedule.py             the scheduling chain: next free slot, queue; finding beat and month folders
   scripts/
     render.py               TESTED reference implementation of the video step — read it first
     short.py                TESTED reference implementation of the Short step
@@ -79,6 +79,7 @@ beatpub/
     learned/                written by `beatpub learn` (gitignored)
   beats/
     _example/meta.yaml      the schema, as an example
+    <month>/<slug>/         optional: one level of grouping, e.g. 2027-01/03-tuesday-night (slug "2027-01/03-tuesday-night")
     <slug>/                 one folder per beat:
       <any name>.wav|mp3    input (first *.wav, else *.mp3/*.flac/*.aiff); title/BPM/key/@handles parsed from the name
       <any name>.jpg|png    input (first *.jpg/*.jpeg/*.png/*.webp; HEIC → clear error)
@@ -157,8 +158,19 @@ beatpub run <slug> [--yes] [--ai] [--no-short]    render → short render → dr
 beatpub auth [--revoke]                 OAuth login; stores token.json
 beatpub stats [--days 30]               views/likes/comments per published video and Short → stats.csv
 beatpub queue                           every beat folder: publish date/time + status, sorted by date; flags duplicates/gaps
+beatpub clean <slug> | --folder X | --all [--dry-run]   uploaded beats only: delete video.mp4 short.mp4 frame.png
+                                        short_frame.png beat.mp3 artwork.jpg from out/, print the space freed
 beatpub doctor                          checks ffmpeg, ffprobe, client_secret.json, token, config
 ```
+
+`run`, `render`, `short render`, `draft`, `approve`, `upload` and `short upload` take
+`--folder <month>` instead of a slug: every beat in `beats/<month>/` in name order.
+Completely uploaded beats are skipped; a "no" at an approve question moves on to the next
+beat; an error stops the batch (a re-run continues there). Within a batch the chain hands
+out consecutive slots in that order even though the drafts are not approved yet. A folder
+under `beats/` is a month folder when it has no audio file, `meta.yaml` or `out/` of its
+own and at least one sub-folder. "Uploaded" for skipping and `clean` = `publish.json`
+exists, and `short_publish.json` too unless the beat gets no Short.
 
 All commands are idempotent: skip work whose outputs are newer than their inputs unless
 `--force`. `upload` / `short upload` refuse to run twice for the same slug if the matching

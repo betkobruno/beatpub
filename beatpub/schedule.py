@@ -8,6 +8,7 @@ from pathlib import Path
 from . import log
 from .config import Config, ScheduleConfig
 from .drafting import DRAFT_NAME, Draft, DraftError, read_draft
+from .meta import AUDIO_EXT, META_NAME
 
 STATUSES = ("new", "rendered", "drafted", "approved", "uploaded")
 
@@ -44,10 +45,47 @@ def slot_text(when: datetime) -> str:
     return f"{when:%a %d %b %Y, %H:%M}"
 
 
-def beat_folders(beats_dir: Path) -> list[Path]:
-    if not beats_dir.is_dir():
+def _subfolders(folder: Path) -> list[Path]:
+    """Sub-folders in name order; names starting with _ or . are not beats (beats/_example)."""
+    if not folder.is_dir():
         return []
-    return sorted(p for p in beats_dir.iterdir() if p.is_dir() and not p.name.startswith(("_", ".")))
+    return sorted((p for p in folder.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))),
+                  key=lambda p: (p.name.casefold(), p.name))
+
+
+def is_month_folder(folder: Path) -> bool:
+    """
+    A folder under beats/ that holds beat folders instead of being one: it has no beat
+    of its own (no audio file, meta.yaml or out/) and at least one sub-folder.
+    """
+    if (folder / "out").is_dir() or (folder / META_NAME).is_file():
+        return False
+    if any(p.is_file() and p.suffix.lower() in AUDIO_EXT for p in folder.iterdir()):
+        return False
+    return bool(_subfolders(folder))
+
+
+def beat_folders(beats_dir: Path) -> list[tuple[str, Path]]:
+    """Every beat as (slug, folder): beats/<slug> and, one level down, beats/<month>/<slug>."""
+    found: list[tuple[str, Path]] = []
+    for folder in _subfolders(beats_dir):
+        if is_month_folder(folder):
+            found += [(f"{folder.name}/{sub.name}", sub) for sub in _subfolders(folder)]
+        else:
+            found.append((folder.name, folder))
+    return found
+
+
+def folder_beats(beats_dir: Path, name: str) -> list[tuple[str, Path]]:
+    """The beats of one month folder, in name order. ValueError (owner-readable) if it is not one."""
+    name = name.strip().replace("\\", "/").strip("/")
+    folder = beats_dir / name
+    if not name or "/" in name or name.startswith(("_", ".")) or not folder.is_dir():
+        raise ValueError(f"no folder named '{name}' in {beats_dir}")
+    if not is_month_folder(folder):
+        raise ValueError(f"{folder} is a beat folder itself or has no beat folders in it — "
+                         "--folder takes a folder of beats, like 2027-01")
+    return [(f"{name}/{sub.name}", sub) for sub in _subfolders(folder)]
 
 
 def _read_draft(folder: Path) -> Draft | None:
@@ -66,13 +104,13 @@ def used_dates(config: Config, skip_slug: str = "", tz: tzinfo | None = None) ->
     Shorts are left out: they follow their video and must not push the chain.
     """
     used: dict[date, list[str]] = {}
-    for folder in beat_folders(config.beats_dir):
-        if folder.name == skip_slug:
+    for slug, folder in beat_folders(config.beats_dir):
+        if slug == skip_slug:
             continue
         draft = _read_draft(folder)
         when = parse_when(draft.publish_at, tz) if draft and draft.approved else None
         if when:
-            used.setdefault(when.date(), []).append(folder.name)
+            used.setdefault(when.date(), []).append(slug)
     for row in log.read_published(config.root / log.PUBLISHED_NAME):
         if (row.get("kind") or "video") != "video":
             continue
@@ -95,16 +133,22 @@ def next_slot(used: list[date] | set[date] | dict, schedule: ScheduleConfig, now
     return as_local(datetime.combine(day, schedule.clock), tz)
 
 
-def assign_slot(config: Config, slug: str, now: datetime | None = None, tz: tzinfo | None = None) -> datetime | None:
-    """The next free slot for this beat, or None when the chain is switched off."""
+def assign_slot(config: Config, slug: str, now: datetime | None = None, tz: tzinfo | None = None, *,
+                reserved: tuple[date, ...] = ()) -> datetime | None:
+    """
+    The next free slot for this beat, or None when the chain is switched off.
+    `reserved`: days held by the other beats of a --folder batch, whose drafts are not
+    approved yet (or, in a dry run, not even written).
+    """
     if not config.schedule.enabled:
         return None
     now = now or datetime.now().astimezone()
-    return next_slot(used_dates(config, skip_slug=slug, tz=tz), config.schedule, now, tz)
+    used = set(used_dates(config, skip_slug=slug, tz=tz)) | set(reserved)
+    return next_slot(used, config.schedule, now, tz)
 
 
 # ----------------------------------------------------------------------------- the queue
-def beat_entry(folder: Path, tz: tzinfo | None = None) -> QueueEntry:
+def beat_entry(slug: str, folder: Path, tz: tzinfo | None = None) -> QueueEntry:
     """One beat folder: how far it is and when its video goes (or went) public."""
     out = folder / "out"
     record = log.read_publish(out / log.PUBLISH_JSON)
@@ -113,12 +157,12 @@ def beat_entry(folder: Path, tz: tzinfo | None = None) -> QueueEntry:
     if record:
         when = (parse_when(record.get("publishAt"), tz) or parse_when(record.get("requestedPublishAt"), tz)
                 or (parse_when(record.get("uploadedAt"), tz) if record.get("privacy") == "public" else None))
-        return QueueEntry(folder.name, "uploaded", when, str(record.get("title") or ""), str(record.get("privacy") or ""))
+        return QueueEntry(slug, "uploaded", when, str(record.get("title") or ""), str(record.get("privacy") or ""))
     status = ("approved" if draft and draft.approved else "drafted" if has_draft
               else "rendered" if (out / "video.mp4").is_file() else "new")
     if draft:
-        return QueueEntry(folder.name, status, parse_when(draft.publish_at, tz), draft.title, draft.privacy)
-    return QueueEntry(folder.name, status)
+        return QueueEntry(slug, status, parse_when(draft.publish_at, tz), draft.title, draft.privacy)
+    return QueueEntry(slug, status)
 
 
 def flag_queue(entries: list[QueueEntry], every_days: int, today: date) -> list[QueueEntry]:
@@ -149,5 +193,5 @@ def flag_queue(entries: list[QueueEntry], every_days: int, today: date) -> list[
 
 def queue(config: Config, now: datetime | None = None, tz: tzinfo | None = None) -> list[QueueEntry]:
     now = now or datetime.now().astimezone()
-    entries = [beat_entry(folder, tz) for folder in beat_folders(config.beats_dir)]
+    entries = [beat_entry(slug, folder, tz) for slug, folder in beat_folders(config.beats_dir)]
     return flag_queue(entries, config.schedule.every_days, as_local(now, tz).date())

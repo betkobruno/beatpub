@@ -45,17 +45,26 @@ beatpub stats                                     # 5. later: views, likes, comm
 beatpub queue                                     #    any time: what goes public when (the scheduling chain)
 ```
 
+A month at once: put the beat folders in `beats\2027-01\` (`01-ran-away`, `02-tuesday-night`, …) and
+
+```
+beatpub run --folder 2027-01                      # every beat in name order, one approve question each
+beatpub clean --folder 2027-01                    # afterwards: delete the big rendered files of uploaded beats
+```
+
 - Title, BPM, key and co-producers come from the file name; artists, moods and `free` from
   `defaults:` in `config.yaml`. A `meta.yaml` (`beatpub new <slug>`) is only for a beat that differs.
 - Nothing is uploaded without your approval (`--yes` skips the question). `--dry-run` works on
   every command.
 - Running again skips what is already done; a beat is uploaded once. `--force` redoes a step.
+- With `schedule.enabled: true` in `config.yaml`, each beat gets the next free day at `schedule.time`
+  (now 02:00); a `publish:` line in a beat's `meta.yaml` overrides it.
 - A 3-minute beat renders in about 1–3 minutes; `--preset veryfast` is fine for a still picture.
 - If a thumbnail did not go through: `beatpub thumbnail <slug>`.
 - Until the YouTube API audit passes (`audit_passed: false`), YouTube keeps every upload private.
 
 The single steps: `render`, `short render`, `draft`, `approve`, `upload`, `short upload`,
-`thumbnail`, `stats`, `learn`, `auth`, `doctor`, `new` — all explained in the manual, and
+`thumbnail`, `queue`, `clean`, `stats`, `learn`, `auth`, `doctor`, `new` — all explained in the manual, and
 `beatpub <command> --help` lists the options.
 
 `draft --ai` lets Claude refine the template draft. It needs `ai_model` in `config.yaml`,

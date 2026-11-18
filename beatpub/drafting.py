@@ -336,12 +336,12 @@ def write_draft(path: Path, draft: Draft, what: str, slug: str) -> None:
     path.write_text(draft_text(draft, what, slug), encoding="utf-8", newline="\n")
 
 
-def read_draft(path: Path) -> Draft:
+def read_draft(path: Path, slug: str = "") -> Draft:
     """Load a draft file as the owner left it. DraftError if it is missing or not a draft."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise DraftError(f"{path} not found — run `beatpub draft {path.parent.parent.name}` first") from None
+        raise DraftError(f"{path} not found — run `beatpub draft {slug or path.parent.parent.name}` first") from None
     except yaml.YAMLError as exc:
         raise DraftError(f"{path} is not valid YAML: {exc}") from None
     if not isinstance(data, dict):

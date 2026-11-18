@@ -108,12 +108,22 @@ def find_inputs(folder: Path) -> tuple[Path, Path]:
     return audio, cover
 
 
+def normalize_slug(slug: str) -> str:
+    """A slug as typed (Windows users type 2027-01\\03-beat) → '2027-01/03-beat'."""
+    return slug.strip().replace("\\", "/").rstrip("/")
+
+
 def beat_dir(beats_dir: Path, slug: str) -> Path:
-    """beats/<slug>, after checking that the slug is one plain folder name."""
-    slug = slug.strip()
-    if not slug or slug in (".", "..") or re.search(r'[\\/:*?"<>|]', slug):
-        raise MetaError(f"'{slug}' is not a usable folder name (no slashes or \\ / : * ? \" < > |)")
-    return beats_dir / slug
+    """
+    beats/<slug>. A slug is one plain folder name, or two joined by a slash for a beat
+    in a month folder: '2027-01/03-tuesday-night'. One level only.
+    """
+    parts = normalize_slug(slug).split("/")
+    if len(parts) > 2 or any(not p or p in (".", "..") or p != p.strip() or re.search(r'[\\/:*?"<>|]', p)
+                             for p in parts):
+        raise MetaError(f"'{slug}' is not a usable beat folder: a plain name like tuesday-night, or one folder "
+                        "deep like 2027-01/03-tuesday-night (no : * ? \" < > |)")
+    return beats_dir.joinpath(*parts)
 
 
 # ----------------------------------------------------------------------------- values

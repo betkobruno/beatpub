@@ -71,6 +71,38 @@ upload. Type `n` to stop — nothing has been sent. You can then change the draf
 That is the whole routine. Want to look before anything is made or sent?
 `beatpub run tuesday-night --dry-run` goes through every step and only prints.
 
+### A whole month at once
+
+Beats can also sit one folder deeper, grouped by month:
+
+```
+beats\2027-01\01-ran-away\
+beats\2027-01\02-tuesday-night\
+beats\2027-01\03-no-sleep\
+```
+
+Put the beat and the cover in each, as always. Then one command does the whole folder:
+
+```
+beatpub run --folder 2027-01
+```
+
+- The beats are done **in name order**, which is why the folders start with `01-`, `02-`, …
+  (use two digits, so that `10-` comes after `09-`).
+- Each beat is rendered, drafted, shown to you with its own **approve question**, and
+  uploaded before the next one starts. `n` skips that beat and goes on to the next;
+  `--yes` uploads all of them without asking.
+- The schedule follows the same order: the first beat gets the next free day, the second
+  the day after, and so on ([section 4](#4-scheduling)).
+- Beats that are already uploaded are skipped, so the same command is safe to run again —
+  after adding beats to the folder, after a `n`, or after an error. An error stops the
+  batch at that beat and tells you what to fix.
+- `beatpub run --folder 2027-01 --dry-run` shows the whole plan first.
+
+A single beat in a month folder is named with the folder in front:
+`beatpub run 2027-01/02-tuesday-night` (a backslash works too). Only one level of folders
+is possible, and loose beats directly in `beats\` keep working as before.
+
 ---
 
 ## 2. The beat folder
@@ -116,7 +148,8 @@ If a name has no BPM or key, everything still works; they are just left out.
 
 Your beat and cover are never changed. You can delete the whole `out\` folder to start a
 beat over — **but not after uploading**: `publish.json` is how BeatPub knows the beat is
-already on YouTube, and without it the next run uploads a second copy.
+already on YouTube, and without it the next run uploads a second copy. To get disk space
+back after uploading, use `beatpub clean` instead; it deletes only what is safe to delete.
 
 In the main folder, `published.csv` lists everything that was uploaded (opens in Excel).
 
@@ -215,21 +248,25 @@ what the change affects is made again.
 ```yaml
 schedule:
   enabled: true
-  time: "18:00"        # local time
+  time: "02:00"        # local time
   every_days: 1
 ```
 
 While `enabled` is `true`, you do not write dates at all. When the draft is written, the
 beat gets **the next free slot**: the day after the latest date already taken, and never
-earlier than tomorrow, at 18:00 your computer's time. Three beats done on one evening go
-out tomorrow, the day after, and the day after that.
+earlier than tomorrow, at 02:00 your computer's time. Three beats done on one evening go
+out tomorrow night, the night after, and the night after that. (02:00 belongs to the new
+day: a slot on Friday means the night from Thursday to Friday.)
 
 - **"Already taken"** means: the date of every *approved* draft, and of every video in
   `published.csv`. A draft you have not approved yet does not hold its day, so approve one
   beat before you draft the next. `beatpub run` does it in that order by itself.
+- **With `--folder`** the beats of the folder get consecutive days in name order, also
+  when none of them is approved yet (`beatpub draft --folder 2027-01` is enough to see the
+  whole month in `beatpub queue`).
 - `every_days: 2` leaves a day between videos, `7` makes it weekly.
 - The slot is shown in the draft and again in the approve step:
-  `slot      Fri 20 Nov 2026, 18:00  (next free slot in the schedule chain)`.
+  `slot      Fri 20 Nov 2026, 02:00  (next free slot in the schedule chain)`.
 - `enabled: false` switches the chain off; beats then follow `privacy_default`.
 
 ### `beatpub queue` — what goes out when
@@ -238,7 +275,8 @@ out tomorrow, the day after, and the day after that.
 beatpub queue
 ```
 
-Lists every beat folder with its date, time and how far it is, sorted by date:
+Lists every beat folder (month folders included) with its date, time and how far it is,
+sorted by date:
 
 | Status | Meaning |
 |---|---|
@@ -286,22 +324,29 @@ until its slot passed, run `beatpub draft <folder> --force` to write the drafts 
 
 ## 5. Every command
 
-`<folder>` is the beat's folder name under `beats\`. Add `--help` to any command to see its
-options, e.g. `beatpub upload --help`.
+`<folder>` is the beat's folder name under `beats\` — `tuesday-night`, or
+`2027-01/02-tuesday-night` for a beat in a month folder. Add `--help` to any command to see
+its options, e.g. `beatpub upload --help`.
 
-Three options mean the same everywhere:
+These options mean the same everywhere:
 
 - `--dry-run` — show what would happen; make nothing, send nothing.
 - `--force` — do it again even though it was done already.
 - `--yes` (or `-y`) — do not stop to ask.
+- `--folder 2027-01` — instead of one beat: every beat in that month folder, in name order.
+  Works with `run`, `render`, `short render`, `draft`, `approve`, `upload`, `short upload`
+  and `clean`. Uploaded beats are skipped; an error stops at that beat, and the same
+  command run again continues there.
 
 ### `beatpub run <folder>` — everything for one beat
 
 Render, Short, draft, approve, upload, Short upload. Steps already done are skipped, so it
-is safe to run again after a stop or a failure.
+is safe to run again after a stop or a failure. A beat that is completely uploaded is left
+alone.
 
 | Option | What it does |
 |---|---|
+| `--folder 2027-01` | Every beat in that month folder, one after the other, with one approve question each. |
 | `--yes` | Uploads without the approve question. |
 | `--no-short` | Skips the Short this time. |
 | `--preset veryfast` | Renders faster. The picture is still, so quality is the same in practice. |
@@ -312,6 +357,7 @@ is safe to run again after a stop or a failure.
 beatpub run tuesday-night
 beatpub run tuesday-night --preset veryfast
 beatpub run tuesday-night --dry-run
+beatpub run --folder 2027-01
 ```
 
 ### `beatpub new <folder>` — make a `meta.yaml`
@@ -410,6 +456,28 @@ beatpub thumbnail tuesday-night
 
 Every beat folder with its publish date, time and status, sorted by date, with duplicates
 and gaps pointed out. It only reads files on your computer. See [Scheduling](#4-scheduling).
+
+### `beatpub clean <folder>` — free disk space
+
+For beats that are **already uploaded** (video, and Short if the beat has one): deletes the
+big files that can be made again — `video.mp4`, `short.mp4`, `frame.png`,
+`short_frame.png`, `beat.mp3` and `artwork.jpg` — and prints how much space that freed.
+Everything else stays: your beat and cover, the drafts, `publish.json`, the thumbnails.
+Beats that are not uploaded yet are never touched.
+
+| Option | What it does |
+|---|---|
+| `--folder 2027-01` | Every uploaded beat in that month folder. |
+| `--all` | Every uploaded beat. |
+| `--dry-run` | Show what would be deleted and how much space it is. |
+
+```
+beatpub clean --all --dry-run
+beatpub clean --folder 2027-01
+```
+
+The tagged `beat.mp3` goes too. If you still send it to artists, copy it somewhere first,
+or get it back later with `beatpub render <folder> --force` (that does not upload anything).
 
 ### `beatpub stats` — how the uploads are doing
 
@@ -516,7 +584,7 @@ it, run the same command again; finished steps are skipped. The common ones:
 | Message | What to do |
 |---|---|
 | `ffmpeg not found` | Install it (`winget install -e --id Gyan.FFmpeg`), close and reopen VS Code. |
-| `beat folder not found` | The name after the command must be the folder name under `beats\`, exactly. |
+| `beat folder not found` | The name after the command must be the folder name under `beats\`, exactly — with the month folder in front if it is in one: `2027-01/02-tuesday-night`. |
 | `no audio file` / `no cover photo` | Put the beat / a JPG or PNG in the folder. |
 | mentions `HEIC` | The cover is an iPhone HEIC file. Export it as JPG and use that. |
 | `… is not approved` | Run `beatpub approve <folder>`. |
