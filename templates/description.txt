@@ -1,0 +1,9 @@
+{% if free %}#typebeat #freebeat #freeforprofittypebeat{% else %}#typebeat #beats #{{ type_beat[0] | lower | replace(' ', '') }}typebeat{% endif %}
+
+{% if beatstars_url %}Purchase: {{ beatstars_url }}
+
+{% endif %}My other Beats: {{ beat_store_url }}
+
+{{ socials }}
+(TAGS)
+{{ keyword_line }}

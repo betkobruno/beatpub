@@ -1,0 +1,28 @@
+artist: CapryBeats
+contact_email: "loopsforcapry@gmail.com"          # optional; not used by the templates unless you add it
+beat_store_url: https://www.beatstars.com/capry   # the "My other Beats:" line
+socials: |                                        # pasted into every description, before (TAGS)
+  IG: https://www.instagram.com/caprybeats/
+privacy_default: private       # keep private until audit_passed: true, then public
+audit_passed: false
+playlist_default: "(FREE) Type Beats 2025"   # exact playlist name on the channel; change when you start a 2026 one
+notify_subscribers: true
+category_id: "10"              # Music
+default_language: en
+ai_model: ""                   # optional: model name for `draft --ai`; empty = disabled
+
+# Channel defaults — used for every beat unless beats/<slug>/meta.yaml overrides a line.
+# Title, BPM, key and collabs always come from the audio file name.
+defaults:
+  type_beat: ["Dro Kenji", "Juice WRLD"]           # the artists in the title: "… | Dro Kenji x Juice WRLD Vibes"
+  similar: ["Shaun Sloan", "Polo G", "Lil Durk"]   # same-lane artists: tags only
+  mood: ["melodic"]                                # → "melodic type beat" tags
+  free: true                                       # (FREE) title, free hashtags, "free …" tags
+  tags_extra: []
+  playlist: ""                                     # empty = playlist_default above
+
+# YouTube Shorts (the vertical preview of each beat)
+shorts:
+  enabled: true
+  playlist: ""                 # optional separate playlist for Shorts; empty = none
+  publish_offset_hours: 2      # Short goes public this many hours after the long video (0 = same time)

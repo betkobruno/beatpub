@@ -1,0 +1,5 @@
+Full beat: {{ youtube_url }}
+{% if beatstars_url %}Purchase: {{ beatstars_url }}
+{% endif %}
+{{ socials }}
+#shorts #typebeat #{{ type_beat[0] | lower | replace(' ', '') }}typebeat

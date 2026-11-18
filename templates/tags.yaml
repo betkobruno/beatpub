@@ -1,0 +1,34 @@
+# Tag pools for `beatpub draft`, copied from the channel's best-performing videos.
+# Placeholders: {a} = each artist (type_beat / similar), {m} = each mood.
+# Order = priority when trimming to YouTube's 500-character limit (per_artist first).
+# The "free …" tags are kept even when a beat has free: false (that only changes the title and hashtags).
+per_artist:            # for each entry in meta.type_beat — the artists in the title
+  - "{a} type beat"
+  - "{a} beats"
+  - "free {a} type beat"
+per_similar:           # for each entry in meta.similar — same-lane artists, tags only
+  - "{a} type beat"
+per_mood:              # for each entry in meta.mood, e.g. melodic, dark
+  - "{m} type beat"
+  - "free {m} type beat"
+base:
+  - "type beat"
+  - "type beats"
+  - "trap beat"
+  - "beats"
+  - "free beat"
+  - "freestyle type beat"
+  - "trap type beat"
+  - "hip hop beat"
+  - "free type beat"
+  - "beat"
+  - "beat type"
+  - "rap"
+  - "rnb"
+  - "free for profit"
+  - "beat trap"
+  - "free for profit type beat"
+  - "rnb type beat"
+  - "fl studio"
+  - "music"
+  - "fl studio beginner tutorial"

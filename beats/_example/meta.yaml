@@ -1,0 +1,34 @@
+# beats/<slug>/meta.yaml — OPTIONAL. `beatpub new <slug>` writes one with what it read from the
+# audio file name; everything else comes from config.yaml → defaults. Add a line here only
+# when THIS beat is different. Every key below is an override; delete what you don't need.
+
+# from the file name ("Ran Away 142 Bpm Fm @caprybeats @sinfulyts.mp3") — set only if the name is unusual
+title: "Ran Away"
+bpm: 142
+key: "F minor"
+collabs: []                      # co-producer handles; empty = the @handles in the file name
+
+# channel defaults you can override per beat (see config.yaml → defaults)
+# type_beat: ["Dro Kenji", "Juice WRLD"]
+# similar: ["Shaun Sloan", "Polo G", "Lil Durk"]
+# mood: ["melodic"]
+# free: true
+# playlist: ""
+
+beatstars_url: ""                # this beat's own bsta.rs link → the "Purchase:" line (empty = no Purchase line)
+publish: ""                      # "", private, unlisted, public, or 2026-11-20T18:00:00+01:00 to schedule
+tags_extra: []
+text_overlay: false              # title/credit on the 16:9 video frame
+zoom: false                      # slow zoom on the 16:9 video
+video_layout: fit                # fit = picture full height, uncropped | fill = cropped to 16:9
+video_margin: 0                  # e.g. 0.05 to leave a little room around the picture
+
+# the Short (vertical preview, uploaded to the same channel)
+short: true
+short_start: ""                  # force the section start ("1:04"); empty = loudest bar-aligned window
+short_length: 30                # seconds, rounded to whole bars (Shorts allow up to 180)
+short_layout: fill               # fill | wide | card
+short_text: false                # true = title + credit written on the picture
+short_wave: false                # true = moving waveform across the lower part
+hook_text: ""                    # optional one line under the picture
+short_publish: ""                # same options as publish; empty = config.shorts.publish_offset_hours after the video

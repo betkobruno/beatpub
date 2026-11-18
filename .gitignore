@@ -1,0 +1,55 @@
+# secrets — never commit
+client_secret.json
+client_secret*.json*
+token.json
+.env
+
+# generated media and drafts
+beats/*/out/
+beats/*/*.wav
+beats/*/*.mp3
+beats/*/*.mp4
+beats/*/*.jpg
+beats/*/*.jpeg
+beats/*/*.png
+beats/*/*.webp
+beats/*/*.flac
+beats/*/*.aiff
+beats/*/*.aif
+beats/*/*.m4a
+!beats/_example/
+templates/learned/
+published.csv
+stats.csv
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# media anywhere in the repo (audio, video, photos)
+*.wav
+*.mp3
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.flac
+*.aiff
+*.aif
+*.m4a
+*.ogg
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.heic
+# ...except the two diagrams drawn for the docs
+!docs/evidence/architecture-diagram.png
+!docs/evidence/user-flow-diagram.png
+# (the other files in docs/evidence/ are browser screenshots that show the
+#  owner's Google account e-mail and bookmarks; they stay local)

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beatpub"
+version = "0.1.0"
+description = "Beat + cover photo -> YouTube video and Short, published in the channel's house style"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13",
+    "Pillow>=10.1",
+    "numpy>=1.26",
+    "mutagen>=1.47",
+    "PyYAML>=6",
+    "Jinja2>=3.1",
+    "google-api-python-client>=2.100",
+    "google-auth-oauthlib>=1.2",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+ai = ["anthropic>=0.40"]
+
+[project.scripts]
+beatpub = "beatpub.cli:main"
+
+[tool.setuptools]
+packages = ["beatpub"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = "-m 'not acceptance'"
+markers = ["acceptance: renders real media with ffmpeg (run with: python -m pytest -m acceptance)"]

@@ -1,0 +1,1 @@
+{{ title }} - {{ type_beat | join(' x ') }} Type Beat{% if free %} (FREE){% endif %}

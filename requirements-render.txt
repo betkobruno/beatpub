@@ -1,0 +1,6 @@
+# only what scripts/render.py and scripts/short.py need on their own
+# (Claude Code adds pyproject.toml for the full tool)
+pillow>=10.1
+mutagen>=1.47
+numpy>=1.26       # scripts/short.py (section picker)
+tzdata>=2024.1    # time zones on Windows (scheduled publish times)
