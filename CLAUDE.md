@@ -58,7 +58,7 @@ beatpub/
   .gitignore
   beatpub/
     __init__.py
-    cli.py                  typer app: new, render, learn, draft, approve, upload, thumbnail, run, auth, doctor, short, stats
+    cli.py                  typer app: new, render, learn, draft, approve, upload, thumbnail, run, auth, doctor, short, stats, queue
     config.py               load/validate config.yaml
     meta.py                 beats/<slug>/meta.yaml + the file-name parser + input discovery
     render.py               16:9 frame, thumbnail, ffmpeg video, mp3 + tags   (port of scripts/render.py)
@@ -66,6 +66,7 @@ beatpub/
     drafting.py             titles/descriptions/tags from templates (+ optional AI)
     youtube.py              OAuth, learn, upload, thumbnail, playlist, stats
     log.py                  published.csv
+    schedule.py             the scheduling chain: next free slot, queue
   scripts/
     render.py               TESTED reference implementation of the video step — read it first
     short.py                TESTED reference implementation of the Short step
@@ -105,7 +106,7 @@ mood: ["melodic"]                # feeds tags; optional
 free: true                       # "(FREE)" prefix and free hashtags ("free …" tags stay either way)
 beatstars_url: ""                # the beat's own bsta.rs link → "Purchase:" line; empty = no Purchase line
 playlist: ""                     # playlist NAME on the channel; falls back to config.playlist_default
-publish: ""                      # "", private, unlisted, public, or an ISO datetime to schedule
+publish: ""                      # "" (= next free slot when config.schedule.enabled), private, unlisted, public, or an ISO datetime
 tags_extra: []                   # appended to generated tags
 text_overlay: false              # title/credit on the 16:9 frame
 zoom: false                      # slow zoom on the 16:9 video
@@ -155,6 +156,7 @@ beatpub thumbnail <slug> [--force] [--dry-run]    set the thumbnails of an alrea
 beatpub run <slug> [--yes] [--ai] [--no-short]    render → short render → draft → (approve unless --yes) → upload → short upload
 beatpub auth [--revoke]                 OAuth login; stores token.json
 beatpub stats [--days 30]               views/likes/comments per published video and Short → stats.csv
+beatpub queue                           every beat folder: publish date/time + status, sorted by date; flags duplicates/gaps
 beatpub doctor                          checks ffmpeg, ffprobe, client_secret.json, token, config
 ```
 
@@ -250,6 +252,16 @@ case-insensitively; then trim to YouTube's limits:
   end of the list until it fits
 - `keyword_line` = the final tag list joined with ", " (the "(TAGS)" block in the
   description, as on the channel)
+**Scheduling chain.** `config.yaml` → `schedule: {enabled, time: "HH:MM" local, every_days}`.
+When `meta.publish` is empty and `schedule.enabled` is true, `draft` assigns the next free
+slot: the later of tomorrow and (the latest publish date used by any other beat's approved
+video draft or any video row in `published.csv`) + `every_days`, at `schedule.time`, local
+time zone → `privacy: private` + `publish_at`. The Short follows by
+`shorts.publish_offset_hours` as usual and never pushes the chain. An explicit `publish:`
+wins. The slot is printed by `draft` and in the approve box. `beatpub queue` lists every
+beat folder (status new / rendered / drafted / approved / uploaded) sorted by date and
+flags duplicates, gaps and beats closer than `every_days`, from today on.
+
 Write `out/draft.yaml`: `title, description, tags, privacy, publish_at, playlist,
 category_id, approved: false`. Also write `out/short_draft.yaml` from `short_title.txt`
 and `short_description.txt` with `youtube_url` left as a placeholder (`{youtube_url}`)

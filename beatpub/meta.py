@@ -410,7 +410,8 @@ def meta_yaml_text(title: str, bpm: int, key: str, collabs: list[str],
         _option("tags_extra: []", "extra tags for this beat, ADDED to the channel's"
                 + (f" ({', '.join(d.tags_extra)})" if d.tags_extra else " (none set in config.yaml)")),
         _option('beatstars_url: ""','this beat\'s own bsta.rs link → the "Purchase:" line (empty = no Purchase line)'),
-        _option('publish: ""', "private, unlisted, public, or 2026-11-20T18:00:00+01:00 to schedule"),
+        _option('publish: ""', "private, unlisted, public, or 2026-11-20T18:00:00+01:00; empty = next free slot "
+                               "(config.yaml → schedule), else privacy_default"),
         _option("text_overlay: false", "true = title/credit on the 16:9 video frame"),
         _option("zoom: false", "true = slow zoom on the 16:9 video (slower render)"),
         _option("video_layout: fit", "fit = picture uncropped | fill = cropped to 16:9"),

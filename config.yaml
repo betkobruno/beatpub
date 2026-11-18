@@ -21,6 +21,13 @@ defaults:
   tags_extra: []
   playlist: ""                                     # empty = playlist_default above
 
+# Scheduling chain — a beat with no `publish:` line in its meta.yaml gets the next free slot:
+# the day after the latest date already taken (never earlier than tomorrow). `beatpub queue` lists them.
+schedule:
+  enabled: true
+  time: "18:00"        # local time
+  every_days: 1
+
 # YouTube Shorts (the vertical preview of each beat)
 shorts:
   enabled: true

@@ -186,7 +186,7 @@ The "free …" search tags stay in either way — that is how the channel is fou
 | `free` | `false` removes (FREE) and the free hashtags. |
 | `beatstars_url` | This beat's link → the "Purchase:" line. |
 | `playlist` | A different playlist, by its exact name on the channel. |
-| `publish` | When and how the video goes out — see [Scheduling](#4-scheduling). |
+| `publish` | When and how the video goes out, instead of the next free slot — see [Scheduling](#4-scheduling). |
 | `tags_extra` | Extra tags for this beat, added to the usual ones. |
 | `text_overlay` | `true` writes the title and credit on the video picture. |
 | `zoom` | `true` adds a slow zoom to the video (rendering takes longer). |
@@ -208,18 +208,66 @@ what the change affects is made again.
 
 ## 4. Scheduling
 
-Put a `publish:` line in the beat's `meta.yaml`:
+### The chain: every beat gets the next free day
+
+`config.yaml` has a `schedule:` block:
+
+```yaml
+schedule:
+  enabled: true
+  time: "18:00"        # local time
+  every_days: 1
+```
+
+While `enabled` is `true`, you do not write dates at all. When the draft is written, the
+beat gets **the next free slot**: the day after the latest date already taken, and never
+earlier than tomorrow, at 18:00 your computer's time. Three beats done on one evening go
+out tomorrow, the day after, and the day after that.
+
+- **"Already taken"** means: the date of every *approved* draft, and of every video in
+  `published.csv`. A draft you have not approved yet does not hold its day, so approve one
+  beat before you draft the next. `beatpub run` does it in that order by itself.
+- `every_days: 2` leaves a day between videos, `7` makes it weekly.
+- The slot is shown in the draft and again in the approve step:
+  `slot      Fri 20 Nov 2026, 18:00  (next free slot in the schedule chain)`.
+- `enabled: false` switches the chain off; beats then follow `privacy_default`.
+
+### `beatpub queue` — what goes out when
+
+```
+beatpub queue
+```
+
+Lists every beat folder with its date, time and how far it is, sorted by date:
+
+| Status | Meaning |
+|---|---|
+| `new` | only the beat and cover are in the folder |
+| `rendered` | the video is made |
+| `drafted` | title, description and tags are written, not approved yet |
+| `approved` | ready to upload |
+| `uploaded` | on YouTube |
+
+The last column points out what breaks the chain from today on: **duplicate** (two beats on
+the same day), **gap** (a day without a video) and **too close** (less than `every_days`
+apart). To move a beat to the next free slot: `beatpub draft <folder> --force`, then approve
+it again. The approve step also warns when the day already has a video.
+
+### One beat at a different time
+
+A `publish:` line in the beat's `meta.yaml` always wins over the chain:
 
 | Line | Result |
 |---|---|
-| *(no line)* | whatever `privacy_default` in `config.yaml` says (now: private) |
-| `publish: private` | private |
+| *(no line)* | the next free slot of the chain; with the chain off, whatever `privacy_default` in `config.yaml` says (now: private) |
+| `publish: private` | private, no date |
 | `publish: unlisted` | unlisted |
 | `publish: public` | public right away |
 | `publish: "2026-11-20T18:00:00"` | uploaded as private now, goes public on 20 November 2026 at 18:00 |
 
 The date is written year-month-day, then `T`, then the time in 24-hour form. It is your
-computer's local time. It must be in the future, otherwise the draft is refused.
+computer's local time. It must be in the future, otherwise the draft is refused. A date
+you set by hand counts as taken for the chain once that draft is approved.
 
 **The Short follows the video.** If the video is scheduled, the Short goes public 2 hours
 later (`publish_offset_hours` in `config.yaml`; `0` = at the same moment). If the video is
@@ -227,8 +275,8 @@ public right away, so is the Short. To give the Short its own time:
 `short_publish: "2026-11-21T12:00:00"`.
 
 The schedule is fixed when the draft is written, and you see it in the approve step
-("private, goes public …"). If you change `publish:` afterwards, run
-`beatpub draft <folder> --force` to write the drafts again.
+("private, goes public …"). If you change `publish:` afterwards, or a draft sat unapproved
+until its slot passed, run `beatpub draft <folder> --force` to write the drafts again.
 
 > **Until the audit passes, none of this takes effect.** YouTube keeps every upload from
 > BeatPub private and drops the schedule, whatever was asked. BeatPub reminds you when
@@ -358,6 +406,11 @@ that were set fine are left alone.
 beatpub thumbnail tuesday-night
 ```
 
+### `beatpub queue` — what goes out when
+
+Every beat folder with its publish date, time and status, sorted by date, with duplicates
+and gaps pointed out. It only reads files on your computer. See [Scheduling](#4-scheduling).
+
 ### `beatpub stats` — how the uploads are doing
 
 Views, likes and comments of everything BeatPub uploaded: one table for videos, one for
@@ -467,7 +520,7 @@ it, run the same command again; finished steps are skipped. The common ones:
 | `no audio file` / `no cover photo` | Put the beat / a JPG or PNG in the folder. |
 | mentions `HEIC` | The cover is an iPhone HEIC file. Export it as JPG and use that. |
 | `… is not approved` | Run `beatpub approve <folder>`. |
-| `… is in the past` | The `publish:` date has passed. Change it, then `beatpub draft <folder> --force`. |
+| `… is in the past` | The `publish:` date or the beat's slot has passed. Change the date if you set one, then `beatpub draft <folder> --force`. |
 | `the title is … characters` | The title cannot fit in 100 characters. Shorten the title or the artists in `meta.yaml`. |
 | `login has expired` | `beatpub auth` — [section 6](#6-when-the-login-expires). |
 | `quota is used up` | YouTube's daily limit. Try again tomorrow (it resets at midnight Pacific time). |

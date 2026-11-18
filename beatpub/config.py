@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field, fields
+from datetime import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,19 @@ class ShortsConfig:
     enabled: bool = True
     playlist: str = ""
     publish_offset_hours: float = 2.0
+
+
+@dataclass(frozen=True)
+class ScheduleConfig:
+    """The scheduling chain: a beat without its own `publish:` gets the next free slot."""
+    enabled: bool = False
+    time: str = "18:00"               # local time of day, HH:MM
+    every_days: int = 1
+
+    @property
+    def clock(self) -> time:
+        hours, minutes = self.time.split(":")
+        return time(int(hours), int(minutes))
 
 
 @dataclass(frozen=True)
@@ -50,6 +65,7 @@ class Config:
     ai_model: str = ""
     defaults: Defaults = field(default_factory=Defaults)
     shorts: ShortsConfig = field(default_factory=ShortsConfig)
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     warnings: tuple[str, ...] = ()
 
     @property
@@ -128,6 +144,26 @@ def parse_defaults(raw: Any) -> tuple[Defaults, list[str]]:
     ), warnings
 
 
+def parse_schedule(raw: Any) -> tuple[ScheduleConfig, list[str]]:
+    if raw is None:
+        return ScheduleConfig(), []
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{CONFIG_NAME}: schedule must be a block of indented `key: value` lines")
+    known = {f.name for f in fields(ScheduleConfig)}
+    warnings = [f"{CONFIG_NAME}: unknown key 'schedule.{k}' (ignored)" for k in raw if k not in known]
+    value = raw.get("time", "18:00")
+    if isinstance(value, int) and not isinstance(value, bool):   # YAML reads an unquoted 18:00 as the number 1080
+        value = f"{value // 60:02d}:{value % 60:02d}"
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip()) if isinstance(value, str) else None
+    if not match or int(match[1]) > 23 or int(match[2]) > 59:
+        raise ConfigError(f"{CONFIG_NAME}: schedule.time must be a time like \"18:00\" (got {raw.get('time')!r})")
+    every = _typed(raw, "every_days", int, 1, "schedule.")
+    if every < 1:
+        raise ConfigError(f"{CONFIG_NAME}: schedule.every_days must be 1 or more")
+    return ScheduleConfig(enabled=_typed(raw, "enabled", bool, False, "schedule."),
+                          time=f"{int(match[1]):02d}:{match[2]}", every_days=every), warnings
+
+
 def parse_config(data: Any, root: Path) -> Config:
     """Validate the parsed YAML of config.yaml. Unknown keys become warnings, not errors."""
     if not isinstance(data, dict):
@@ -149,6 +185,9 @@ def parse_config(data: Any, root: Path) -> Config:
 
     defaults, defaults_warnings = parse_defaults(data.get("defaults"))
     warnings += defaults_warnings
+
+    schedule, schedule_warnings = parse_schedule(data.get("schedule"))
+    warnings += schedule_warnings
 
     raw_shorts = data.get("shorts") or {}
     if not isinstance(raw_shorts, dict):
@@ -183,6 +222,7 @@ def parse_config(data: Any, root: Path) -> Config:
         ai_model=str(_typed(data, "ai_model", str, "")).strip(),
         defaults=defaults,
         shorts=shorts,
+        schedule=schedule,
         warnings=tuple(warnings),
     )
 

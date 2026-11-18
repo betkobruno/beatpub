@@ -18,7 +18,7 @@ from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeR
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, drafting, log, youtube
+from . import __version__, drafting, log, schedule, youtube
 from .youtube import YouTubeError
 from .config import Config, ConfigError, find_root, load_config
 from .drafting import DRAFT_NAME, SHORT_DRAFT_NAME, Draft, DraftError
@@ -251,7 +251,16 @@ def short_render(
 
 
 # ----------------------------------------------------------------------------- draft + approve
-def show_draft(draft: Draft, heading: str) -> None:
+def slot_notes(meta: Meta, config: Config) -> list[str]:
+    """What to say next to the slot of the video draft and of the Short draft ('' = just the date)."""
+    if not config.schedule.enabled or meta.publish:
+        return ["", ""]
+    hours = config.shorts.publish_offset_hours
+    short = "" if meta.short_publish else f"{hours:g} h after the video" if hours else "with the video"
+    return ["next free slot in the schedule chain", short]
+
+
+def show_draft(draft: Draft, heading: str, slot_note: str = "") -> None:
     """One draft as the owner will see it on YouTube, plus the numbers that have limits."""
     body = Text()
     body.append(draft.title + "\n", style="bold")
@@ -261,6 +270,9 @@ def show_draft(draft: Draft, heading: str) -> None:
     body.append(", ".join(draft.tags) + "\n\n")
     when = f"private, goes public {draft.publish_at}" if draft.publish_at else draft.privacy
     body.append(f"privacy   {when}\n")
+    slot = schedule.parse_when(draft.publish_at)
+    if slot:
+        body.append(f"slot      {schedule.slot_text(slot)}" + (f"  ({slot_note})" if slot_note else "") + "\n")
     body.append(f"playlist  {draft.playlist or '(none)'}\n")
     body.append(f"approved  {'yes' if draft.approved else 'no'}")
     console.print(Panel(body, title=heading, title_align="left", border_style="green" if draft.approved else "yellow"))
@@ -295,14 +307,15 @@ def make_drafts(slug: str, *, ai: bool = False, force: bool = False, dry_run: bo
     templates, out = config.root / "templates", folder / "out"
     files = draft_files(folder, meta, config)
     names = tuple(path.name for path, _ in files)
+    notes = slot_notes(meta, config)
     try:
         fingerprint = drafting.inputs_fingerprint(meta, config, templates, ai)
         status = drafting.draft_status(out, fingerprint, names)
         if status in ("current", "edited") and not force and not dry_run:
             existing = [drafting.read_draft(path) for path, _ in files]
             if show:
-                for (_, heading), item in zip(files, existing):
-                    show_draft(item, heading)
+                for (_, heading), item, note in zip(files, existing, notes):
+                    show_draft(item, heading, note)
             if status == "current":
                 say(f"drafts are up to date in {out} — nothing to do (use --force to write them again)")
             else:
@@ -310,7 +323,8 @@ def make_drafts(slug: str, *, ai: bool = False, force: bool = False, dry_run: bo
                     "edited or approved them, so they were kept. `beatpub draft " + slug + " --force` rewrites them.")
             return existing
 
-        video, short = drafting.build_drafts(meta, config, templates)
+        slot = None if meta.publish else schedule.assign_slot(config, slug)
+        video, short = drafting.build_drafts(meta, config, templates, slot=slot)
         if ai:
             reason = drafting.ai_unavailable(config)
             if reason:
@@ -326,11 +340,13 @@ def make_drafts(slug: str, *, ai: bool = False, force: bool = False, dry_run: bo
                 except DraftError as exc:
                     say(f"--ai failed ({exc}) — using the template draft")
         drafts = [video, short][: len(files)]
-        for (path, heading), item in zip(files, drafts):
+        for (path, heading), item, note in zip(files, drafts, notes):
             if not dry_run:
                 drafting.write_draft(path, item, heading, slug)
             if show:
-                show_draft(item, heading)
+                show_draft(item, heading, note)
+        if slot:
+            say(f"scheduled: {schedule.slot_text(slot)} — the next free slot in the chain (`beatpub queue` shows all)")
         reminder = drafting.audit_reminder(config, *drafts)
         if reminder and show:
             console.print("[yellow]" + reminder + "[/yellow]")
@@ -379,9 +395,15 @@ def approve(
         raise fail(str(exc)) from None
 
     problems: list[str] = []
-    for (path, heading), item in zip(files, drafts):
-        show_draft(item, heading)
+    for (path, heading), item, note in zip(files, drafts, slot_notes(meta, config)):
+        show_draft(item, heading, note)
         problems += [f"{path.name}: {p}" for p in drafting.validate_draft(item)]
+    slot = schedule.parse_when(drafts[0].publish_at)
+    taken = schedule.used_dates(config, skip_slug=slug).get(slot.date()) if slot else None
+    if taken:
+        console.print("[yellow]warning:[/yellow]", end=" ")
+        say(f"{slot:%a %d %b %Y} already has a video ({', '.join(taken)}) — `beatpub draft {slug} --force` "
+            "picks the next free slot")
     if problems:
         for problem in problems:
             console.print("[red]problem:[/red]", end=" ")
@@ -698,6 +720,38 @@ def run(
     if not dry_run:
         step("done")
         say("check both in YouTube Studio: https://studio.youtube.com/")
+
+
+@app.command()
+def queue() -> None:
+    """Every beat folder with its publish date and status, sorted by date; flags duplicates and gaps."""
+    config = get_config()
+    entries = schedule.queue(config)
+    if not entries:
+        say(f"no beat folders in {config.beats_dir}")
+        return
+    table = Table(title="Queue — sorted by publish date", title_justify="left")
+    for name in ("date", "time", "beat", "status", "title", "check"):
+        table.add_column(name, overflow="fold")
+    colors = {"uploaded": "green", "approved": "cyan", "drafted": "yellow"}
+    for entry in entries:
+        if entry.when:
+            day, clock = f"{entry.when:%a %d %b %Y}", f"{entry.when:%H:%M}"
+        elif entry.status in ("drafted", "approved", "uploaded"):
+            day, clock = "no date", entry.privacy
+        else:
+            day, clock = "—", ""
+        table.add_row(day, clock, Text(entry.slug), Text(entry.status, style=colors.get(entry.status, "")),
+                      Text(entry.title), Text("; ".join(entry.flags), style="red"))
+    console.print(table)
+    flagged = sum(1 for entry in entries if entry.flags)
+    s = config.schedule
+    say(f"chain: one video every {s.every_days} day{'s' if s.every_days != 1 else ''} at {s.time}"
+        + ("" if s.enabled else "  (schedule.enabled is false in config.yaml — no slots are assigned)"))
+    if flagged:
+        say(f"{flagged} beat(s) break the chain — `beatpub draft <folder> --force` gives a beat the next free slot")
+    elif any(entry.when for entry in entries):
+        say("no duplicates or gaps from today on")
 
 
 @app.command()

@@ -42,6 +42,7 @@ mkdir beats\tuesday-night                         # 1. a folder per beat
 beatpub run tuesday-night --dry-run               # 3. optional: see everything that would be made and sent
 beatpub run tuesday-night                         # 4. render → Short → draft → asks you to approve → uploads both
 beatpub stats                                     # 5. later: views, likes, comments
+beatpub queue                                     #    any time: what goes public when (the scheduling chain)
 ```
 
 - Title, BPM, key and co-producers come from the file name; artists, moods and `free` from

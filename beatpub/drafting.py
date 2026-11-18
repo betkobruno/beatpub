@@ -205,9 +205,15 @@ def rfc3339(when: datetime) -> str:
     return when.isoformat(timespec="seconds")
 
 
-def video_schedule(meta: Meta, config: Config, now: datetime | None = None) -> tuple[str, str]:
-    """(privacy, publish_at) for the video: meta.publish, else config.privacy_default."""
+def video_schedule(meta: Meta, config: Config, now: datetime | None = None,
+                   slot: datetime | None = None) -> tuple[str, str]:
+    """
+    (privacy, publish_at) for the video: meta.publish if set; else the slot the scheduling
+    chain assigned (private until then); else config.privacy_default.
+    """
     privacy, when = parse_publish(meta.publish, now)
+    if not privacy and slot is not None:
+        return "private", rfc3339(slot)
     return (privacy or config.privacy_default), (rfc3339(when) if when else "")
 
 
@@ -236,8 +242,12 @@ def audit_reminder(config: Config, *drafts: Draft) -> str:
 
 
 # ----------------------------------------------------------------------------- drafts
-def build_drafts(meta: Meta, config: Config, templates: Path, now: datetime | None = None) -> tuple[Draft, Draft]:
-    """The video draft and the Short draft from meta + config + templates/. Nothing is written."""
+def build_drafts(meta: Meta, config: Config, templates: Path, now: datetime | None = None,
+                 slot: datetime | None = None) -> tuple[Draft, Draft]:
+    """
+    The video draft and the Short draft from meta + config + templates/. Nothing is written.
+    `slot` is the publish time from the scheduling chain; an explicit meta.publish wins over it.
+    """
     if not meta.title:
         raise DraftError("no title: put it in the audio file name or set `title:` in meta.yaml")
     if not meta.type_beat:
@@ -248,7 +258,7 @@ def build_drafts(meta: Meta, config: Config, templates: Path, now: datetime | No
     notes = [f"tags over {TAGS_MAX} characters: dropped {', '.join(dropped)}"] if dropped else []
 
     title, title_notes = fit_title(env, "title.txt", context)
-    schedule = video_schedule(meta, config, now)
+    schedule = video_schedule(meta, config, now, slot)
     video = Draft(title=title, description=fit_description(env, "description.txt", context, tags), tags=tags,
                   privacy=schedule[0], publish_at=schedule[1],
                   playlist=meta.playlist or config.playlist_default, category_id=config.category_id,

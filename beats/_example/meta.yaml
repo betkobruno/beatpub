@@ -16,7 +16,9 @@ collabs: []                      # co-producer handles; empty = the @handles in 
 # playlist: ""
 
 beatstars_url: ""                # this beat's own bsta.rs link → the "Purchase:" line (empty = no Purchase line)
-publish: ""                      # "", private, unlisted, public, or 2026-11-20T18:00:00+01:00 to schedule
+publish: ""                      # empty = the next free slot of the chain (config.yaml → schedule), or
+                                 # privacy_default when the chain is off. Set it only to override:
+                                 # private, unlisted, public, or a date like 2026-11-20T18:00:00+01:00
 tags_extra: []
 text_overlay: false              # title/credit on the 16:9 video frame
 zoom: false                      # slow zoom on the 16:9 video
